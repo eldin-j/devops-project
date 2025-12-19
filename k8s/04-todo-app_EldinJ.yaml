@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-app
+  namespace: todo
+  labels:
+    app: todo-app
+
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+
+  selector:
+    matchLabels:
+      app: todo-app
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: todo-app
+
+    spec:
+      # Чтобы тянуть образ из GHCR (если приватный)
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: app
+          image: ghcr.io/devilishzbc/online-library:main-9-84db29c
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          # Resources обязательны для HPA по CPU
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1024Mi"
+
+          # 1) ConfigMap -> env
+          envFrom:
+            - configMapRef:
+                name: todo-app-config
+
+          # 2) Secret -> env (маппим в spring vars)
+          env:
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: POSTGRES_DB
+
+          # 5) Mount ConfigMap + Secret в контейнер (как файлы)
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/todo/config
+              readOnly: true
+            - name: db-secret
+              mountPath: /etc/todo/secret
+              readOnly: true
+
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30   # 150 секунд на старт
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+
+      volumes:
+        - name: app-config
+          configMap:
+            name: todo-app-config
+        - name: db-secret
+          secret:
+            secretName: db-credentials
+

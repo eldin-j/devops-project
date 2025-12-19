@@ -1,0 +1,16 @@
+---
+- name: DevOps Final Exam Part 4 - Ansible (Sabituly Nurmukhammed)
+  hosts: local
+  become: true
+
+  vars_files:
+    - ../group_vars/all/all_EldinJ.yml
+    - ../group_vars/all/vault_EldinJ.yml
+
+  roles:
+    - role: common
+    - role: users
+    - role: docker
+    - role: kubectl
+    - role: minikube
+    - role: k8s_deploy

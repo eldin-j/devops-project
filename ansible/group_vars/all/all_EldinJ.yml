@@ -1,0 +1,15 @@
+target_user: devops
+
+minikube_cpus: 2
+minikube_memory: 3072
+
+k8s_namespace: todo
+k8s_manifests_dir: "{{ playbook_dir }}/../../k8s"
+
+ghcr_registry: ghcr.io
+ghcr_secret_name: ghcr-pull-secret
+
+# Берем из Vault
+ghcr_username: "{{ vault_ghcr_username }}"
+ghcr_token: "{{ vault_ghcr_token }}"
+ghcr_email: "{{ vault_ghcr_email }}"

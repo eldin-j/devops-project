@@ -1,0 +1,54 @@
+---
+- name: Apply namespace manifest
+  ansible.builtin.command: "kubectl apply -f {{ k8s_manifests_dir }}/00-namespace_EldinJ.yaml"
+  become: false
+  become_user: "{{ target_user }}"
+  environment:
+    HOME: "/home/{{ target_user }}"
+    KUBECONFIG: "/home/{{ target_user }}/.kube/config"
+  changed_when: false
+
+- name: Create/Update GHCR imagePullSecret from Vault
+  ansible.builtin.shell: |
+    set -e
+    kubectl -n {{ k8s_namespace }} create secret docker-registry {{ ghcr_secret_name }} \
+      --docker-server={{ ghcr_registry }} \
+      --docker-username="{{ ghcr_username }}" \
+      --docker-password="{{ ghcr_token }}" \
+      --docker-email="{{ ghcr_email }}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+  become: false
+  become_user: "{{ target_user }}"
+  environment:
+    HOME: "/home/{{ target_user }}"
+    KUBECONFIG: "/home/{{ target_user }}/.kube/config"
+
+- name: Patch todo-app deployment to use imagePullSecrets
+  ansible.builtin.command: >
+    kubectl -n {{ k8s_namespace }} patch deployment todo-app
+    --type=merge
+    -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"{{ ghcr_secret_name }}"}]}}}}'
+  become: false
+  become_user: "{{ target_user }}"
+  environment:
+    HOME: "/home/{{ target_user }}"
+    KUBECONFIG: "/home/{{ target_user }}/.kube/config"
+  changed_when: false
+
+- name: Apply all manifests in k8s directory
+  ansible.builtin.command: "kubectl apply -n {{ k8s_namespace }} -f {{ k8s_manifests_dir }}/"
+  become: false
+  become_user: "{{ target_user }}"
+  environment:
+    HOME: "/home/{{ target_user }}"
+    KUBECONFIG: "/home/{{ target_user }}/.kube/config"
+  changed_when: false
+
+- name: Wait for todo-app rollout
+  ansible.builtin.command: "kubectl -n {{ k8s_namespace }} rollout status deployment/todo-app --timeout=10m"
+  become: false
+  become_user: "{{ target_user }}"
+  environment:
+    HOME: "/home/{{ target_user }}"
+    KUBECONFIG: "/home/{{ target_user }}/.kube/config"
+  changed_when: false

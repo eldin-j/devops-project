@@ -1,0 +1,134 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    APP_DIR    = 'app/online-library'
+    DOCKERFILE = 'docker/Dockerfile_EldinJ'
+    COMPOSE    = 'docker/docker-compose_EldinJ.yml'
+
+    IMAGE_REPO = 'ghcr.io/devilishzbc/online-library'
+
+    // Jenkins Credentials IDs (как у тебя в Credentials)
+    REG_CREDS  = 'docker-registry'
+    PG_ENV_ID  = 'pg-env'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          def sha = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
+          def b   = (env.BRANCH_NAME ?: 'manual').replaceAll('[^A-Za-z0-9_.-]','-')
+          env.IMAGE_TAG = "${b}-${env.BUILD_NUMBER}-${sha}"
+          env.APP_IMAGE = "${env.IMAGE_REPO}:${env.IMAGE_TAG}"
+          env.REG_HOST  = env.IMAGE_REPO.startsWith('ghcr.io/') ? 'ghcr.io' : ''
+        }
+      }
+    }
+
+    stage('Build') {
+      steps {
+        dir(env.APP_DIR) {
+          sh '''
+            set -e
+            chmod +x ./gradlew
+            ./gradlew --no-daemon clean build
+          '''
+        }
+      }
+    }
+
+    stage('Test') {
+      steps {
+        dir(env.APP_DIR) {
+          sh '''
+            set -e
+            ./gradlew --no-daemon test
+          '''
+        }
+        junit allowEmptyResults: true, testResults: "${APP_DIR}/build/test-results/test/*.xml"
+      }
+    }
+
+    stage('Static Analysis (optional)') {
+      steps {
+        dir(env.APP_DIR) {
+          sh '''
+            set -e
+            if ./gradlew --no-daemon tasks --all | grep -qE "(checkstyleMain|spotbugsMain)"; then
+              echo "Running Checkstyle/SpotBugs..."
+              ./gradlew --no-daemon checkstyleMain spotbugsMain
+            else
+              echo "No Checkstyle/SpotBugs tasks found -> skipping"
+            fi
+          '''
+        }
+      }
+    }
+
+    stage('Docker Build (dynamic tag)') {
+      steps {
+        sh '''
+          set -e
+          docker build -t "$APP_IMAGE" -f "$DOCKERFILE" .
+        '''
+      }
+    }
+
+    stage('Docker Push') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: "${REG_CREDS}", usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+          sh '''
+            set -e
+            if [ -n "$REG_HOST" ]; then
+              echo "$REG_PASS" | docker login "$REG_HOST" -u "$REG_USER" --password-stdin
+            fi
+
+            docker push "$APP_IMAGE"
+
+            if [ -n "$REG_HOST" ]; then
+              docker logout "$REG_HOST"
+            fi
+          '''
+        }
+      }
+    }
+
+    stage('Deploy (main only)') {
+      when { branch 'main' }
+      steps {
+        withCredentials([string(credentialsId: "${PG_ENV_ID}", variable: 'PG_ENV')]) {
+          sh '''
+            set -e
+
+            mkdir -p docker
+
+            # PG_ENV у тебя сейчас одной строкой -> превращаем в .env с переносами строк
+            # Работает и если PG_ENV уже многострочный, и если он через пробелы
+            printf "%s\n" "$PG_ENV" | sed -E 's/[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=)/\\n\\1/g' > docker/.env
+            sed -i 's/\\r$//' docker/.env
+
+            echo "---- env keys (masked) ----"
+            grep -E '^(POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD)=' docker/.env | sed 's/=.*$/=****/' || true
+
+            APP_IMAGE="$APP_IMAGE" docker compose -f "$COMPOSE" --env-file docker/.env up -d --no-build
+            docker compose -f "$COMPOSE" --env-file docker/.env ps
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: '**/build/libs/*.jar', allowEmptyArchive: true
+    }
+  }
+}
+

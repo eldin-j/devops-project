@@ -1,0 +1,10 @@
+.git
+**/.git
+**/build
+**/.gradle
+**/out
+**/target
+**/*.log
+docker/.env
+.env
+node_modules

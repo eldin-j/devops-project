@@ -1,0 +1,33 @@
+# build artifacts
+build/
+**/build/
+target/
+out/
+
+# logs
+logs/
+*.log
+
+# env/secrets
+.env
+*.pem
+*.key
+
+# node
+node_modules/
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml
+docker/.env
+
+# Ansible Vault / secrets (Sabituly Nurmukhammed)
+ansible/group_vars/all/vault_*.yml
+.vault_pass_*
+
+# local binaries / artifacts
+kubectl
+minikube-linux-amd64
+docker/--env-file
